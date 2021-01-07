@@ -422,7 +422,7 @@ namespace HMX_PLC
                 case EValueType._BOOL:
                     {
                         data = ByteArrayFormat(data);
-                        for (int i = 0; i < length / 2; ++i)
+                        for (int i = 0; i < length / 2; i++)
                         {
                             BitArray bits = new BitArray(data.Skip(i * 2).Take(2).ToArray());
 
