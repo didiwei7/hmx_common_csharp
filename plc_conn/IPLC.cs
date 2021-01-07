@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -6,6 +6,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 
 namespace HMX_PLC
 {
@@ -24,12 +25,17 @@ namespace HMX_PLC
         _STRING
     }
 
+
     public static class PLCConvert
     {
         public static byte LowByte(Int16 value) { return Convert.ToByte(value & 0xFF); }
         public static byte LowByte(UInt16 value) { return Convert.ToByte(value & 0xFF); }
         public static byte HighByte(Int16 value) { return Convert.ToByte((value >> 8) & 0xFF); }
-        public static byte HighByte(UInt16 value) { return Convert.ToByte((value >> 8) & 0xFF); }
+        public static byte HighByte(UInt16 value)
+        {
+            byte ff = Convert.ToByte((value >> 8) & 0xFF);
+            return ff;
+        }
         public static byte[] ArrayByte(Int16 value) { return new byte[] { Convert.ToByte((value >> 8) & 0xFF), Convert.ToByte(value & 0xFF) }; }
         public static byte[] ArrayByte(UInt16 value) { return new byte[] { Convert.ToByte((value >> 8) & 0xFF), Convert.ToByte(value & 0xFF) }; }
         public static byte[] ArrayByte(Int32 value) { return new byte[] { Convert.ToByte((value >> 24) & 0xFF), Convert.ToByte((value >> 16) & 0xFF), Convert.ToByte((value >> 8) & 0xFF), Convert.ToByte(value & 0xFF) }; }
@@ -66,21 +72,37 @@ namespace HMX_PLC
                 valueType = EValueType._DOUBLE;
             else if (typeof(Byte).Name == type)
                 valueType = EValueType._STRING;
+            else if (typeof(String).Name == type)
+                valueType = EValueType._STRING;
             else return false;
 
             return true;
         }
-        public static bool FinsAddrArea(string value, ref byte area)
+
+        public enum EFinsMode { Single, Double }
+        public static bool FinsAddrArea(string value, EFinsMode mode, ref byte area)
         {
             if (value == "c" || value == "C" || value == "CIO")
-                area = 0xB0;
+                if (mode == EFinsMode.Double)
+                    area = 0xB0;
+                else
+                    area = 0x30;
             else if (value == "w" || value == "W")
-                area = 0xB1;
+                if (mode == EFinsMode.Double)
+                    area = 0xB1;
+                else
+                    area = 0x31;
             else if (value == "h" || value == "H")
-                area = 0xB2;
+                if (mode == EFinsMode.Double)
+                    area = 0xB2;
+                else
+                    area = 0x32;
             else if (value == "d" || value == "D" || value == "DM")
-                area = 0x82;
-            else 
+                if (mode == EFinsMode.Double)
+                    area = 0x82;
+                else
+                    area = 0x02;
+            else
                 return false;
 
             return true;
@@ -111,7 +133,7 @@ namespace HMX_PLC
 
     }
 
-    public class PLCConn 
+    public class PLCConn
     {
     }
 
@@ -124,14 +146,19 @@ namespace HMX_PLC
 
     public class PLCFins : PLCConn
     {
+        private Mutex mutex = new Mutex();
+        public string IP { get; set; } = "127.0.0.1";// "192.168.1.10";
+        public UInt16 Port { get; set; } = 9600;
+        public UInt16 ConnTimeout { get; set; } = 300;
+        public bool IsConnect { get; set; } = false;
         public enum EFinsOperate { Read = 0x0101, Write = 0x0102 }
-        public enum EFinsMode { Single, Double }
+
         public class FinsHeaderTcp
         {
-            public byte[] header     = new byte[] { 0x46, 0x49, 0x4E, 0x53 };
-            public byte[] length     = new byte[] { 0x00, 0x00, 0x00, 0x00 };
-            public byte[] command    = new byte[] { 0x00, 0x00, 0x00, 0x00 };
-            public byte[] errorCode  = new byte[] { 0x00, 0x00, 0x00, 0x00 };
+            public byte[] header = new byte[] { 0x46, 0x49, 0x4E, 0x53 };
+            public byte[] length = new byte[] { 0x00, 0x00, 0x00, 0x00 };
+            public byte[] command = new byte[] { 0x00, 0x00, 0x00, 0x00 };
+            public byte[] errorCode = new byte[] { 0x00, 0x00, 0x00, 0x00 };
             public byte[] clientNode = new byte[] { 0x00, 0x00, 0x00, 0x00 };
         };
         public class FinsHeaderFrame
@@ -153,22 +180,18 @@ namespace HMX_PLC
         {
             public string Address = "";
             public EValueType ValueType = EValueType._BOOL;
-            
+
             public EFinsOperate Operator = EFinsOperate.Read;
-            public byte   Area = Convert.ToByte(0);
-            public byte   HighByte = Convert.ToByte(0);
-            public byte   LowByte = Convert.ToByte(0);
-            public byte   Decimal = Convert.ToByte(0);
-            public UInt16 Count  = 1;
+            public byte Area = Convert.ToByte(0);
+            public byte HighByte = Convert.ToByte(0);
+            public byte LowByte = Convert.ToByte(0);
+            public byte Decimal = Convert.ToByte(0);
+            public UInt16 Count = 1;
 
             public UInt16 FinsCount = 1;
         }
 
-        public string IP { get; set; } = "192.168.1.10";
-        public UInt16 Port { get; set; } = 9600;
-        public UInt16 ConnTimeout { get; set; } = 300;
-        public bool IsConnect { get; set; } = false;
-        
+
         private Socket socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp) { SendTimeout = 300, ReceiveTimeout = 1000 };
         private List<byte> header = new List<byte>();
         public PLCFins()
@@ -176,7 +199,7 @@ namespace HMX_PLC
 
         }
 
-        public bool Connect() 
+        public bool Connect()
         {
             if (!Connect(IP, Port))
                 return false;
@@ -201,7 +224,7 @@ namespace HMX_PLC
             return IsConnect;
         }
 
-        public void DisConnect() 
+        public void DisConnect()
         {
             IsConnect = false;
             socket.Disconnect(true);
@@ -211,6 +234,24 @@ namespace HMX_PLC
             return true;
         }
 
+        private bool SocketSend(byte[] array, ref int recvlen, ref byte[] recvmsg)
+        {
+            mutex.WaitOne();
+            try
+            {
+                if (array.Length != socket.Send(array))
+                    return false;
+
+                recvlen = socket.Receive(recvmsg);
+            }
+            catch
+            {
+            }
+
+            mutex.ReleaseMutex();
+            return true;
+
+        }
         private bool ShakeHand()
         {
             // lock
@@ -227,11 +268,13 @@ namespace HMX_PLC
             sendmsg.AddRange(headerTcp.errorCode);
             sendmsg.AddRange(headerTcp.clientNode);
 
-            if (0 >= socket.Send(sendmsg.ToArray()))
+            string msg = BitConverter.ToString(sendmsg.ToArray());
+            byte[] recvmsg = new byte[2077];
+            int len = 0;
+            if (!SocketSend(sendmsg.ToArray(), ref len, ref recvmsg))
                 return false;
 
-            byte[] recvmsg = new byte[1024];
-            if (socket.Receive(recvmsg) != 24 ||
+            if (len != 24 ||
                 recvmsg[12] != 0x00 ||
                 recvmsg[13] != 0x00 ||
                 recvmsg[14] != 0x00 ||
@@ -263,7 +306,7 @@ namespace HMX_PLC
 
             return true;
         }
-        // 这个正则不熟，要测试
+
         private bool ParseAddrInfo(string addr, UInt16 count, string valueType, EFinsOperate opt, ref FinsAddrInfo addrInfo)
         {
             addrInfo.Address = addr;
@@ -283,8 +326,17 @@ namespace HMX_PLC
                 return false;
             var snum = matchNum[0].Value;
 
-            if (!PLCConvert.FinsAddrArea(sarea, ref addrInfo.Area))
-                return false;
+            if (addrInfo.ValueType == EValueType._BOOL && addrInfo.Operator == EFinsOperate.Write)
+            {
+                if (!PLCConvert.FinsAddrArea(sarea, PLCConvert.EFinsMode.Single, ref addrInfo.Area))
+                    return false;
+            }
+            else
+            {
+                if (!PLCConvert.FinsAddrArea(sarea, PLCConvert.EFinsMode.Double, ref addrInfo.Area))
+                    return false;
+            }
+
 
             if (!PLCConvert.FinsAddrNum(snum, ref addrInfo.HighByte, ref addrInfo.LowByte, ref addrInfo.Decimal))
                 return false;
@@ -298,13 +350,19 @@ namespace HMX_PLC
                     addrInfo.FinsCount = (UInt16)((addrInfo.Decimal + addrInfo.Count) / 16 + 1);
                     break;
 
+                case EValueType._STRING:
+
                 case EValueType._INT16:
                     addrInfo.FinsCount = addrInfo.Count;
                     break;
 
+                case EValueType._FLOAT:
+
                 case EValueType._INT32:
                     addrInfo.FinsCount = (UInt16)(addrInfo.Count * 2);
                     break;
+
+                case EValueType._DOUBLE:
 
                 case EValueType._INT64:
                     addrInfo.FinsCount = (UInt16)(addrInfo.Count * 4);
@@ -314,8 +372,6 @@ namespace HMX_PLC
                     break;
 
             }
-
-            var readCount = (addrInfo.Decimal + addrInfo.Count) / 16;
 
             return true;
         }
@@ -344,6 +400,16 @@ namespace HMX_PLC
 
             return true;
         }
+        private byte[] ByteArrayFormat(byte[] array)
+        {
+            for (int i = 0; 2 * i + 1 < array.Length; i++)
+            {
+                byte temp = array[2 * i];
+                array[2 * i] = array[2 * i + 1];
+                array[2 * i + 1] = temp;
+            }
+            return array;
+        }
         private bool ParseReadRecv<T>(FinsAddrInfo addrInfo, byte[] data, ref List<T> result)
         {
             int length = data.Count();
@@ -355,13 +421,14 @@ namespace HMX_PLC
 
                 case EValueType._BOOL:
                     {
+                        data = ByteArrayFormat(data);
                         for (int i = 0; i < length / 2; ++i)
                         {
-                            BitArray bits = new BitArray(data.Skip(i * 2).Take(2).Reverse().ToArray());
+                            BitArray bits = new BitArray(data.Skip(i * 2).Take(2).ToArray());
 
                             if (i == 0)
                             {
-                                for(int j = addrInfo.Decimal; j < Math.Min(16, addrInfo.Decimal + addrInfo.Count); ++j)
+                                for (int j = addrInfo.Decimal; j < Math.Min(16, addrInfo.Decimal + addrInfo.Count); ++j)
                                     result.Add((T)(Object)bits.Get(j));
                             }
                             else if (i == length / 2 - 1)
@@ -384,47 +451,55 @@ namespace HMX_PLC
                     break;
 
                 case EValueType._INT16:
-                    for (int i = 0; i < length / 2; ++i)
-                        result.Add((T)(Object)BitConverter.ToInt16(data.Skip(i * 2).Take(2).Reverse().ToArray(), 0));
+                    data = ByteArrayFormat(data);
+                    for (int i = 0; i < length / 2; i++)
+                        result.Add((T)(Object)BitConverter.ToInt16(data, 2 * i));
                     break;
 
                 case EValueType._INT32:
-                    for (int i = 0; i < length / 4; ++i)
-                        result.Add((T)(Object)BitConverter.ToInt32(data.Skip(i * 4).Take(4).Reverse().ToArray(), 0));
+                    data = ByteArrayFormat(data);
+                    for (int i = 0; i < length / 4; i++)
+                        result.Add((T)(Object)BitConverter.ToInt32(data, 4 * i));
                     break;
 
                 case EValueType._INT64:
-                    for (int i = 0; i < length / 8; ++i)
-                        result.Add((T)(Object)BitConverter.ToInt64(data.Skip(i * 8).Take(8).Reverse().ToArray(), 0));
+                    data = ByteArrayFormat(data);
+                    for (int i = 0; i < length / 8; i++)
+                        result.Add((T)(Object)BitConverter.ToInt64(data, 8 * i));
                     break;
 
                 case EValueType._UINT16:
-                    for (int i = 0; i < length / 2; ++i)
-                        result.Add((T)(Object)BitConverter.ToUInt16(data.Skip(i * 2).Take(2).Reverse().ToArray(), 0));
+                    data = ByteArrayFormat(data);
+                    for (int i = 0; i < length / 2; i++)
+                        result.Add((T)(Object)BitConverter.ToInt16(data, 2 * i));
                     break;
 
                 case EValueType._UINT32:
-                    for (int i = 0; i < length / 4; ++i)
-                        result.Add((T)(Object)BitConverter.ToUInt32(data.Skip(i * 4).Take(4).Reverse().ToArray(), 0));
+                    data = ByteArrayFormat(data);
+                    for (int i = 0; i < length / 4; i++)
+                        result.Add((T)(Object)BitConverter.ToUInt32(data, 4 * i));
                     break;
 
                 case EValueType._UINT64:
-                    for (int i = 0; i < length / 8; ++i)
-                        result.Add((T)(Object)BitConverter.ToUInt64(data.Skip(i * 8).Take(8).Reverse().ToArray(), 0));
+                    data = ByteArrayFormat(data);
+                    for (int i = 0; i < length / 8; i++)
+                        result.Add((T)(Object)BitConverter.ToUInt64(data, 8 * i));
                     break;
 
                 case EValueType._FLOAT:
-                    for (int i = 0; i < length / 4; ++i)
-                        result.Add((T)(Object)BitConverter.ToString(data.Skip(i * 4).Take(4).Reverse().ToArray(), 0));
+                    data = ByteArrayFormat(data);
+                    for (int i = 0; i < length / 4; i++)
+                        result.Add((T)(Object)BitConverter.ToSingle(data, 4 * i));
                     break;
 
                 case EValueType._DOUBLE:
-                    for (int i = 0; i < length / 8; ++i)
-                        result.Add((T)(Object)BitConverter.ToDouble(data.Skip(i * 8).Take(8).Reverse().ToArray(), 0));
+                    data = ByteArrayFormat(data);
+                    for (int i = 0; i < length / 8; i++)
+                        result.Add((T)(Object)BitConverter.ToDouble(data, 8 * i));
                     break;
 
                 case EValueType._STRING:
-                    for (int i = 0; i < length; ++i)
+                    for (int i = 0; i < length; i++)
                         result.Add((T)(Object)data[i]);
                     break;
 
@@ -439,7 +514,7 @@ namespace HMX_PLC
             if (!IsConnect)
                 return false;
 
-            if (count <= 0 || count > 2000)
+            if (count <= 0 || count > 1000)
                 return false;
 
             FinsAddrInfo addrInfo = new FinsAddrInfo();
@@ -450,12 +525,11 @@ namespace HMX_PLC
             if (!ParseReadSend(addrInfo, ref sendmsg))
                 return false;
 
-            var sendlen = socket.Send(sendmsg.ToArray());
-            if (sendmsg.Count() != sendlen)
+            byte[] recvmsg = new byte[2077];
+            int recvlen = 0;
+            if (!SocketSend(sendmsg.ToArray(), ref recvlen, ref recvmsg))
                 return false;
 
-            byte[] recvmsg = new byte[1024];
-            var recvlen = socket.Receive(recvmsg);
             if (recvlen != 30 + addrInfo.FinsCount * 2)
                 return false;
 
@@ -466,19 +540,19 @@ namespace HMX_PLC
         }
         private bool ParseWriteSend<T>(FinsAddrInfo addrInfo, List<T> values, ref List<byte> sendmsg)
         {
-            List<byte> command = new List<byte>(8);
+            List<byte> command = new List<byte>();
 
             // 指令 读
-            command[0] = PLCConvert.HighByte(Convert.ToUInt16(addrInfo.Operator));
-            command[1] = PLCConvert.LowByte(Convert.ToUInt16(addrInfo.Operator));
+            command.Add(PLCConvert.HighByte(Convert.ToUInt16(addrInfo.Operator)));
+            command.Add(PLCConvert.LowByte(Convert.ToUInt16(addrInfo.Operator)));
             // 地址
-            command[2] = addrInfo.Area;                     // 区域
-            command[3] = addrInfo.HighByte;                 // 地址-整数位
-            command[4] = addrInfo.LowByte;
-            command[5] = addrInfo.Decimal;                  // 地址-小数位
+            command.Add(addrInfo.Area);                     // 区域
+            command.Add(addrInfo.HighByte);                 // 地址-整数位
+            command.Add(addrInfo.LowByte);
+            command.Add(addrInfo.Decimal);                  // 地址-小数位
             // 长度
-            command[6] = PLCConvert.HighByte(Convert.ToUInt16(addrInfo.Count));
-            command[7] = PLCConvert.LowByte(Convert.ToUInt16(addrInfo.Count));
+            command.Add(PLCConvert.HighByte(Convert.ToUInt16(addrInfo.Count)));
+            command.Add(PLCConvert.LowByte(Convert.ToUInt16(addrInfo.Count)));
 
             // 数据
             EValueType valueType = EValueType._BOOL;
@@ -493,51 +567,55 @@ namespace HMX_PLC
 
                 case EValueType._BOOL:
                     foreach (var i in values)
-                        data.AddRange(BitConverter.GetBytes((Byte)(Object)i).Reverse());
+                        data.AddRange(ByteArrayFormat(BitConverter.GetBytes((bool)(Object)i)));
                     break;
 
                 case EValueType._INT16:
                     foreach (var i in values)
-                        data.AddRange(BitConverter.GetBytes((Int16)(Object)i).Reverse());
+                        data.AddRange(ByteArrayFormat(BitConverter.GetBytes((Int16)(Object)i)));
                     break;
 
                 case EValueType._INT32:
                     foreach (var i in values)
-                        data.AddRange(BitConverter.GetBytes((Int32)(Object)i).Reverse());
+                        data.AddRange(ByteArrayFormat(BitConverter.GetBytes((Int32)(Object)i)));
                     break;
 
                 case EValueType._INT64:
                     foreach (var i in values)
-                        data.AddRange(BitConverter.GetBytes((Int64)(Object)i).Reverse());
+                        data.AddRange(ByteArrayFormat(BitConverter.GetBytes((Int64)(Object)i)));
                     break;
 
                 case EValueType._UINT16:
                     foreach (var i in values)
-                        data.AddRange(BitConverter.GetBytes((UInt16)(Object)i).Reverse());
+                        data.AddRange(ByteArrayFormat(BitConverter.GetBytes((UInt16)(Object)i)));
                     break;
 
                 case EValueType._UINT32:
                     foreach (var i in values)
-                        data.AddRange(BitConverter.GetBytes((UInt32)(Object)i).Reverse());
+                        data.AddRange(ByteArrayFormat(BitConverter.GetBytes((UInt32)(Object)i)));
                     break;
 
                 case EValueType._UINT64:
                     foreach (var i in values)
-                        data.AddRange(BitConverter.GetBytes((UInt64)(Object)i).Reverse());
+                        data.AddRange(ByteArrayFormat(BitConverter.GetBytes((UInt64)(Object)i)));
                     break;
 
                 case EValueType._FLOAT:
                     foreach (var i in values)
-                        data.AddRange(BitConverter.GetBytes((Single)(Object)i).Reverse());
+                        data.AddRange(ByteArrayFormat(BitConverter.GetBytes((Single)(Object)i)));
                     break;
 
                 case EValueType._DOUBLE:
                     foreach (var i in values)
-                        data.AddRange(BitConverter.GetBytes((Double)(Object)i).Reverse());
+                        data.AddRange(ByteArrayFormat(BitConverter.GetBytes((Double)(Object)i)));
+                    break;
+
+                case EValueType._STRING:
+                    foreach (var i in values)
+                        data.AddRange((System.Text.Encoding.UTF8.GetBytes(Convert.ToString(i) + '\0')));
                     break;
             }
 
-            command.AddRange(data);
 
             var length = -8 + header.Count + command.Count + data.Count;
 
@@ -551,7 +629,7 @@ namespace HMX_PLC
             return true;
         }
         private bool ParseWriteRecv(List<byte> recvmsg) { return recvmsg.Last() == 0; }
-        private bool Write<T>(string addr, UInt16 count, List<T> values)
+        private bool Write<T>(string addr, UInt16 count, List<T> values, EFinsOperate eFinsOperate = EFinsOperate.Read)
         {
             if (!IsConnect)
                 return false;
@@ -560,43 +638,35 @@ namespace HMX_PLC
                 return false;
 
             FinsAddrInfo addrInfo = new FinsAddrInfo();
-            if (!ParseAddrInfo(addr, count, typeof(T).Name, EFinsOperate.Read, ref addrInfo))
+            if (!ParseAddrInfo(addr, count, typeof(T).Name, eFinsOperate, ref addrInfo))
                 return false;
 
             List<byte> sendmsg = new List<byte>();
             if (!ParseWriteSend(addrInfo, values, ref sendmsg))
                 return false;
 
-            if (sendmsg.Count() != socket.Send(sendmsg.ToArray()))
+            byte[] recvmsg = new byte[100];
+            int len = 0;
+            if (!SocketSend(sendmsg.ToArray(), ref len, ref recvmsg))
                 return false;
 
-            List<byte> recvmsg = new List<byte>();
-            if (socket.Receive(recvmsg.ToArray()) <= 30)
+            if (len < 30)
                 return false;
 
-            return ParseWriteRecv(recvmsg);
+            return ParseWriteRecv(recvmsg.ToList());
         }
-
         public List<bool> ReadBools(string addr, UInt16 count)
         {
             List<Boolean> rst = new List<Boolean>();
             if (!Read<Boolean>(addr, count, ref rst))
-                Console.WriteLine("ReadBool ERR");
+                Console.WriteLine("ReadBools ERR");
 
             return rst;
         }
-        public int ReadInt16(string addr)
-        {
-            List<Int16> rst = new List<Int16>();
-            if (!Read<Int16>(addr, 1, ref rst))
-            {
-                Console.WriteLine("ReadInt16 ERR");
-                return 0;
-            }
+        public bool ReadBool(string addr) => ReadBools(addr, 1).First();
 
-            return rst.First();
-        }
-        // 不知道怎么List<short> -> List<int>
+        public int ReadInt16(string addr) => ReadInt16s(addr, 1).First();
+
         public List<Int16> ReadInt16s(string addr, UInt16 count)
         {
             List<Int16> rst = new List<Int16>();
@@ -604,15 +674,107 @@ namespace HMX_PLC
                 Console.WriteLine("ReadInt16s ERR");
             return rst;
         }
-        
+
         public string ReadString(string addr, UInt16 count)
         {
             List<Byte> rst = new List<Byte>();
             if (!Read<Byte>(addr, count, ref rst))
-                Console.WriteLine("ReadInt16s ERR");
+                Console.WriteLine("ReadString ERR");
             return Encoding.ASCII.GetString(rst.ToArray());
         }
-        public bool WriteInt16(string addr, Int16 value) { return Write<Int16>(addr, 1, new List<Int16>() { value }); }
-        public bool WriteInt16s(string addr, List<Int16> value) { return Write<Int16>(addr, 1, value); }
+
+        public double ReadDouble(string addr) => ReadDoubles(addr, 1).First();
+
+        public List<double> ReadDoubles(string addr, UInt16 count)
+        {
+            List<double> rst = new List<double>();
+            if (!Read<double>(addr, count, ref rst))
+                Console.WriteLine("ReadDoubles ERR");
+            return rst;
+        }
+
+        public Int32 ReadInt32(string addr) => ReadInt32s(addr, 1).First();
+
+        public List<Int32> ReadInt32s(string addr, UInt16 count)
+        {
+            List<Int32> rst = new List<Int32>();
+            if (!Read<Int32>(addr, count, ref rst))
+                Console.WriteLine("ReadInt32s ERR");
+            return rst;
+        }
+
+        public UInt32 ReadUInt32(string addr) => ReadUInt32s(addr, 1).First();
+
+        public List<UInt32> ReadUInt32s(string addr, UInt16 count)
+        {
+            List<UInt32> rst = new List<UInt32>();
+            if (!Read<UInt32>(addr, count, ref rst))
+                Console.WriteLine("ReadUInt32s ERR");
+            return rst;
+        }
+
+        public UInt64 ReadUInt64(string addr) => ReadUInt64s(addr, 1).First();
+
+        public List<UInt64> ReadUInt64s(string addr, UInt16 count)
+        {
+            List<UInt64> rst = new List<UInt64>();
+            if (!Read<UInt64>(addr, count, ref rst))
+                Console.WriteLine("ReadUInt64 ERR");
+            return rst;
+        }
+
+        public Int64 ReadInt64(string addr) => ReadInt64s(addr, 1).First();
+
+        public List<Int64> ReadInt64s(string addr, UInt16 count)
+        {
+            List<Int64> rst = new List<Int64>();
+            if (!Read<Int64>(addr, count, ref rst))
+                Console.WriteLine("ReadInt64s ERR");
+            return rst;
+        }
+
+
+        public float ReadFloat(string addr) => ReadFloats(addr, 1).First();
+
+        public List<float> ReadFloats(string addr, UInt16 count)
+        {
+            List<float> rst = new List<float>();
+            if (!Read<float>(addr, count, ref rst))
+                Console.WriteLine("ReadFloats ERR");
+            return rst;
+
+        }
+        public bool WriteBool(string addr, bool value) => WriteBools(addr, new List<bool> { value });
+        public bool WriteBools(string addr, List<bool> value) { return Write<bool>(addr, 1, value, EFinsOperate.Write); }
+        public bool WriteInt16(string addr, Int16 value) => WriteInt16s(addr, new List<Int16> { value });
+        public bool WriteInt16s(string addr, List<Int16> value) { return Write<Int16>(addr, 1, value, EFinsOperate.Write); }
+        public bool WriteUInt16(string addr, UInt16 value) => WriteUInt16s(addr, new List<UInt16> { value });
+        public bool WriteUInt16s(string addr, List<UInt16> value) { return Write<UInt16>(addr, 1, value, EFinsOperate.Write); }
+
+
+        public bool WriteInt32(string addr, Int32 value) => WriteInt32s(addr, new List<Int32> { value });
+        public bool WriteInt32s(string addr, List<Int32> value) { return Write<Int32>(addr, 1, value, EFinsOperate.Write); }
+        public bool WriteUInt32(string addr, UInt32 value) => WriteUInt32s(addr, new List<UInt32> { value });
+        public bool WriteUInt32s(string addr, List<UInt32> value) { return Write<UInt32>(addr, 1, value, EFinsOperate.Write); }
+
+
+
+        public bool WriteInt64(string addr, Int64 value) => WriteInt64s(addr, new List<Int64> { value });
+        public bool WriteInt64s(string addr, List<Int64> value) { return Write<Int64>(addr, 1, value, EFinsOperate.Write); }
+        public bool WriteUInt64(string addr, UInt64 value) => WriteUInt64s(addr, new List<UInt64> { value });
+        public bool WriteUInt64s(string addr, List<UInt64> value) { return Write<UInt64>(addr, 1, value, EFinsOperate.Write); }
+
+        public bool WriteDouble(string addr, double value) => WriteDoubles(addr, new List<double> { value });
+        public bool WriteDoubles(string addr, List<double> value) { return Write<double>(addr, 1, value, EFinsOperate.Write); }
+
+
+        public bool WriteFloat(string addr, float value) => WriteFloats(addr, new List<float> { value });
+        public bool WriteFloats(string addr, List<float> value) { return Write<float>(addr, 1, value, EFinsOperate.Write); }
+
+
+        public bool WriteString(string addr, string value) { return Write<String>(addr, 1, new List<string> { value }, EFinsOperate.Write); }
+
+
+
     }
 }
