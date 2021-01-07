@@ -22,8 +22,7 @@ namespace HMX_PLC
         _UINT64,
         _FLOAT,
         _DOUBLE,
-        _STRING,
-        _CHAR
+        _STRING
     }
 
 
