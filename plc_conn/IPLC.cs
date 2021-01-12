@@ -323,7 +323,7 @@ namespace HMX_PLC
                 return false;
             var sarea = matchArea[0].Value;
 
-            var matchNum = Regex.Matches(addr, @"([1-9]\d*\.?\d*)|(0\.\d*[1-9])");
+            var matchNum = Regex.Matches(addr, @"([0-9]\d*\.?\d*)|(0\.\d*[1-9])");
             if (matchNum.Count != 1)
                 return false;
             var snum = matchNum[0].Value;
