@@ -123,6 +123,8 @@ namespace HMX_PLC
                 var num = Convert.ToUInt16(result[0]);
                 high = Convert.ToByte((num >> 8) & 0xFF);
                 low = Convert.ToByte(num & 0xFF);
+                if (result[1] == "1")
+                    result[1] = "10";
                 decima = Convert.ToByte(result[1]);
             }
             else
