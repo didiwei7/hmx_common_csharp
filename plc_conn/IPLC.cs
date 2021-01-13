@@ -8,6 +8,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 
+
 namespace HMX_PLC
 {
     public enum EValueType
@@ -233,7 +234,24 @@ namespace HMX_PLC
         }
         public bool ReConnect()
         {
-            return true;
+            bool a = WriteBool("W0", true);
+            bool b = ReadBool("W0");
+            if (a && b)
+            {
+                IsConnect = true;
+                return true;
+            }
+
+            try { IPAddress.Parse(IP); }
+            catch { return false; }
+
+            socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp) { SendTimeout = 300, ReceiveTimeout = 1000 };
+
+            socket.Connect(IPAddress.Parse(IP), Port);
+            // task.Wait(ConnTimeout);
+            IsConnect = socket.Connected;
+
+            return IsConnect;
         }
 
         private bool SocketSend(byte[] array, ref int recvlen, ref byte[] recvmsg)
@@ -424,7 +442,7 @@ namespace HMX_PLC
                 case EValueType._BOOL:
                     {
                         data = ByteArrayFormat(data);
-                        for (int i = 0; i < length / 2; i++)
+                        for (int i = 0; i < length / 2; ++i)
                         {
                             BitArray bits = new BitArray(data.Skip(i * 2).Take(2).ToArray());
 
@@ -665,15 +683,45 @@ namespace HMX_PLC
 
             return rst;
         }
-        public bool ReadBool(string addr) => ReadBools(addr, 1).First();
-
-        public int ReadInt16(string addr) => ReadInt16s(addr, 1).First();
+        public bool ReadBool(string addr)
+        {
+            List<bool> ls = ReadBools(addr, 1);
+            if (ls.Count > 0)
+                return ls[0];
+            else
+                return false;
+        }
+        public Int16 ReadInt16(string addr)
+        {
+            List<Int16> ls = ReadInt16s(addr, 1);
+            if (ls.Count > 0)
+                return ls[0];
+            else
+                return 0;
+        }
 
         public List<Int16> ReadInt16s(string addr, UInt16 count)
         {
             List<Int16> rst = new List<Int16>();
             if (!Read<Int16>(addr, count, ref rst))
                 Console.WriteLine("ReadInt16s ERR");
+            return rst;
+        }
+
+        public UInt16 ReadUInt16(string addr)
+        {
+            List<UInt16> ls = ReadUInt16s(addr, 1);
+            if (ls.Count > 0)
+                return ls[0];
+            else
+                return 0;
+        }
+
+        public List<UInt16> ReadUInt16s(string addr, UInt16 count)
+        {
+            List<UInt16> rst = new List<UInt16>();
+            if (!Read<UInt16>(addr, count, ref rst))
+                Console.WriteLine("ReadUInt16s ERR");
             return rst;
         }
 
@@ -685,7 +733,14 @@ namespace HMX_PLC
             return Encoding.ASCII.GetString(rst.ToArray());
         }
 
-        public double ReadDouble(string addr) => ReadDoubles(addr, 1).First();
+        public double ReadDouble(string addr)
+        {
+            List<double> ls = ReadDoubles(addr, 1);
+            if (ls.Count > 0)
+                return ls[0];
+            else
+                return 0;
+        }
 
         public List<double> ReadDoubles(string addr, UInt16 count)
         {
@@ -695,7 +750,14 @@ namespace HMX_PLC
             return rst;
         }
 
-        public Int32 ReadInt32(string addr) => ReadInt32s(addr, 1).First();
+        public Int32 ReadInt32(string addr)
+        {
+            List<Int32> ls = ReadInt32s(addr, 1);
+            if (ls.Count > 0)
+                return ls[0];
+            else
+                return 0;
+        }
 
         public List<Int32> ReadInt32s(string addr, UInt16 count)
         {
@@ -705,7 +767,14 @@ namespace HMX_PLC
             return rst;
         }
 
-        public UInt32 ReadUInt32(string addr) => ReadUInt32s(addr, 1).First();
+        public UInt32 ReadUInt32(string addr)
+        {
+            List<UInt32> ls = ReadUInt32s(addr, 1);
+            if (ls.Count > 0)
+                return ls[0];
+            else
+                return 0;
+        }
 
         public List<UInt32> ReadUInt32s(string addr, UInt16 count)
         {
@@ -725,7 +794,14 @@ namespace HMX_PLC
             return rst;
         }
 
-        public Int64 ReadInt64(string addr) => ReadInt64s(addr, 1).First();
+        public Int64 ReadInt64(string addr)
+        {
+            List<Int64> ls = ReadInt64s(addr, 1);
+            if (ls.Count > 0)
+                return ls[0];
+            else
+                return 0;
+        }
 
         public List<Int64> ReadInt64s(string addr, UInt16 count)
         {
@@ -736,7 +812,14 @@ namespace HMX_PLC
         }
 
 
-        public float ReadFloat(string addr) => ReadFloats(addr, 1).First();
+        public float ReadFloat(string addr)
+        {
+            List<float> ls = ReadFloats(addr, 1);
+            if (ls.Count > 0)
+                return ls[0];
+            else
+                return 0.0f;
+        }
 
         public List<float> ReadFloats(string addr, UInt16 count)
         {
@@ -775,8 +858,6 @@ namespace HMX_PLC
 
 
         public bool WriteString(string addr, string value) { return Write<String>(addr, 1, new List<string> { value }, EFinsOperate.Write); }
-
-
 
     }
 }
